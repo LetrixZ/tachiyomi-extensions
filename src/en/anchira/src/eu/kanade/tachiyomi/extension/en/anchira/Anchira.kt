@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.extension.en.anchira
 import android.app.Application
 import android.content.SharedPreferences
 import androidx.preference.PreferenceScreen
+import androidx.preference.SwitchPreferenceCompat
 import com.ensarsarajcic.kotlinx.serialization.msgpack.MsgPack
 import com.ensarsarajcic.kotlinx.serialization.msgpack.MsgPackConfiguration
 import eu.kanade.tachiyomi.network.GET
@@ -18,11 +19,10 @@ import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import eu.kanade.tachiyomi.source.online.HttpSource
 import kotlinx.serialization.decodeFromByteArray
 import okhttp3.Headers
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
-import rx.Observable
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.util.concurrent.TimeUnit
@@ -50,7 +50,9 @@ class Anchira : HttpSource(), ConfigurableSource {
         Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
     }
 
-    override fun headersBuilder(): Headers.Builder = super.headersBuilder().add("Referer", baseUrl).add("X-Requested-With", "XMLHttpRequest")
+    override fun headersBuilder(): Headers.Builder = super.headersBuilder()
+        .add("Referer", baseUrl)
+        .add("X-Requested-With", "XMLHttpRequest")
 
     // Latest
 
@@ -60,16 +62,25 @@ class Anchira : HttpSource(), ConfigurableSource {
         val bytes = response.body.bytes()
         val data = msgPack.decodeFromByteArray<LibraryResponse>(bytes)
 
-        return MangasPage(
-            data.entries.map {
-                SManga.create().apply {
-                    url = "$baseUrl/${it.id}/${it.key}"
-                    title = it.title
-                    thumbnail_url = "$cdnUrl/${it.id}/${it.key}/m/${it.cover.name}"
-                }
-            }.toList(),
-            data.entries.size < data.total,
-        )
+        return if (data.entries != null) {
+            MangasPage(
+                data.entries.map {
+                    SManga.create().apply {
+                        url = "/g/${it.id}/${it.key}"
+                        title = it.title
+                        thumbnail_url = "$cdnUrl/${it.id}/${it.key}/m/${it.cover.name}"
+                        artist = it.tags.filter { it.namespace == 1 }.joinToString(", ") { it.name }
+                        author = it.tags.filter { it.namespace == 2 }.joinToString(", ") { it.name }
+                        genre = it.tags.filter { it.namespace != 1 && it.namespace != 2 }.sortedBy { it.namespace }.joinToString(", ") { it.name }
+                        initialized = true
+                        update_strategy = UpdateStrategy.ONLY_FETCH_ONCE
+                    }
+                }.toList(),
+                data.entries.size < data.total,
+            )
+        } else {
+            MangasPage(listOf(), false)
+        }
     }
 
     // Popular
@@ -81,7 +92,7 @@ class Anchira : HttpSource(), ConfigurableSource {
     // Search
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
-        val url = apiUrl.toHttpUrlOrNull()!!.newBuilder()
+        val url = apiUrl.toHttpUrl().newBuilder()
 
         if (query.isNotBlank()) {
             url.addQueryParameter("s", query)
@@ -120,36 +131,18 @@ class Anchira : HttpSource(), ConfigurableSource {
             }
         }
 
-        return GET(url.toString(), headers)
+        return GET(url.build(), headers)
     }
 
     override fun searchMangaParse(response: Response) = latestUpdatesParse(response)
 
     // Details
 
-    override fun mangaDetailsRequest(manga: SManga) = GET("$apiUrl/${getPathFromUrl(manga.url)}", headers)
-
-    override fun mangaDetailsParse(response: Response): SManga {
-        val bytes = response.body.bytes()
-        val data = msgPack.decodeFromByteArray<Entry>(bytes)
-
-        return SManga.create().apply {
-            url = "$baseUrl/g/${data.id}/${data.key}"
-            title = data.title
-            artist = data.tags.filter { it.namespace == 1 }.joinToString(", ") { it.name }
-            author = data.tags.filter { it.namespace == 2 }.joinToString(", ") { it.name }
-            genre = data.tags.filter { it.namespace != 1 && it.namespace != 2 }.joinToString(", ") { it.name }
-            status = SManga.UNKNOWN
-            thumbnail_url = "$cdnUrl/${data.id}/${data.key}/m/${data.data[data.thumbIndex].name}"
-            update_strategy = UpdateStrategy.ONLY_FETCH_ONCE
-        }
-    }
-
-    override fun getMangaUrl(manga: SManga) = manga.url
+    override fun mangaDetailsParse(response: Response) = throw UnsupportedOperationException("Not used")
 
     // Chapter
 
-    override fun chapterListRequest(manga: SManga) = mangaDetailsRequest(manga)
+    override fun chapterListRequest(manga: SManga) = GET("$apiUrl/${getPathFromUrl(manga.url)}", headers)
 
     override fun chapterListParse(response: Response): List<SChapter> {
         val bytes = response.body.bytes()
@@ -157,7 +150,7 @@ class Anchira : HttpSource(), ConfigurableSource {
 
         return listOf(
             SChapter.create().apply {
-                url = "$baseUrl/g/${data.id}/${data.key}"
+                url = "/g/${data.id}/${data.key}"
                 name = "Chapter"
                 date_upload = data.publishedAt
                 chapter_number = 1f
@@ -167,19 +160,19 @@ class Anchira : HttpSource(), ConfigurableSource {
 
     // Page List
 
-    override fun pageListRequest(chapter: SChapter) = GET("$apiUrl/${getPathFromUrl(chapter.url)}}", headers)
+    override fun pageListRequest(chapter: SChapter) = GET("$apiUrl/${getPathFromUrl(chapter.url)}", headers)
 
     override fun pageListParse(response: Response): List<Page> {
         val bytes = response.body.bytes()
         val data = msgPack.decodeFromByteArray<Entry>(bytes)
 
-        return data.data.mapIndexed { i, img -> Page(i, url = "$cdnUrl/${data.id}/${data.key}/${data.hash}/b/${img.name}") }
+        return data.data.mapIndexed { i, img -> Page(i, imageUrl = "$cdnUrl/${data.id}/${data.key}/${data.hash}/b/${img.name}") }
     }
 
-    override fun fetchImageUrl(page: Page): Observable<String> {
+    override fun imageRequest(page: Page): Request {
         val imageQuality = if (preferences.getBoolean(IMAGE_QUALITY_PREF, false)) "a" else "b"
 
-        return Observable.just(page.url.replace("/b/", "/$imageQuality/"))
+        return GET(page.imageUrl!!.replace("/b/", "/$imageQuality/"), headers)
     }
 
     override fun imageUrlParse(response: Response) = throw UnsupportedOperationException("Not used")
@@ -187,7 +180,7 @@ class Anchira : HttpSource(), ConfigurableSource {
     // Settings
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
-        val imageQualityPref = androidx.preference.SwitchPreferenceCompat(screen.context).apply {
+        val imageQualityPref = SwitchPreferenceCompat(screen.context).apply {
             key = IMAGE_QUALITY_PREF
             title = "Use original images"
             summary = getPrefSummary(preferences.getBoolean(IMAGE_QUALITY_PREF, false)).plus("\nCurrently unavailable to avoid being blocked")

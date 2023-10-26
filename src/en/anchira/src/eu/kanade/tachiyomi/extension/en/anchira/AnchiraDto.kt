@@ -17,8 +17,6 @@ data class ListEntry(
 @Serializable
 data class Image(
     @SerialName("n") val name: String,
-    @SerialName("w") val width: Int,
-    @SerialName("h") val height: Int,
 )
 
 @Serializable
@@ -29,9 +27,7 @@ data class Tag(
 
 @Serializable
 data class LibraryResponse(
-    val entries: List<ListEntry>,
-    val limit: Int,
-    val page: Int,
+    val entries: List<ListEntry>? = null,
     val total: Int,
 )
 
@@ -39,15 +35,9 @@ data class LibraryResponse(
 data class Entry(
     val id: Int,
     val key: String,
-    val filename: String,
-    @SerialName("uploaded_at") val uploadedAt: Long,
-    @SerialName("archived_at") val archivedAt: Long,
-    @SerialName("updated_at") val updatedAt: Long,
     @SerialName("published_at") val publishedAt: Long,
-    val status: Int,
     val title: String,
-    val pages: Int,
-    @SerialName("thumb_index") val thumbIndex: Int,
+    @SerialName("thumb_index") val thumbnailIndex: Int,
     val hash: String,
     val data: List<Image>,
     val tags: List<Tag>,
