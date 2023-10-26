@@ -1,8 +1,13 @@
 package eu.kanade.tachiyomi.extension.en.anchira
 
+import android.app.Application
+import android.content.SharedPreferences
+import androidx.preference.PreferenceScreen
 import com.ensarsarajcic.kotlinx.serialization.msgpack.MsgPack
 import com.ensarsarajcic.kotlinx.serialization.msgpack.MsgPackConfiguration
 import eu.kanade.tachiyomi.network.GET
+import eu.kanade.tachiyomi.network.interceptor.rateLimit
+import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
@@ -17,9 +22,12 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
+import rx.Observable
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
+import java.util.concurrent.TimeUnit
 
-class Anchira : HttpSource() {
-
+class Anchira : HttpSource(), ConfigurableSource {
     private val msgPack = MsgPack(configuration = MsgPackConfiguration(ignoreUnknownKeys = true))
 
     override val name = "Anchira"
@@ -34,7 +42,13 @@ class Anchira : HttpSource() {
 
     override val supportsLatest = true
 
-    override val client: OkHttpClient = network.cloudflareClient
+    override val client: OkHttpClient = network.cloudflareClient.newBuilder()
+        .rateLimit(1, 2, TimeUnit.SECONDS)
+        .build()
+
+    private val preferences: SharedPreferences by lazy {
+        Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
+    }
 
     override fun headersBuilder(): Headers.Builder = super.headersBuilder().add("Referer", baseUrl).add("X-Requested-With", "XMLHttpRequest")
 
@@ -113,7 +127,7 @@ class Anchira : HttpSource() {
 
     // Details
 
-    override fun mangaDetailsRequest(manga: SManga) = GET("$apiUrl/${manga.url.split("/").reversed()[1]}/${manga.url.split("/").last()}", headers)
+    override fun mangaDetailsRequest(manga: SManga) = GET("$apiUrl/${getPathFromUrl(manga.url)}", headers)
 
     override fun mangaDetailsParse(response: Response): SManga {
         val bytes = response.body.bytes()
@@ -153,21 +167,62 @@ class Anchira : HttpSource() {
 
     // Page List
 
-    override fun pageListRequest(chapter: SChapter) = GET("$apiUrl/${chapter.url.split("/").reversed()[1]}/${chapter.url.split("/").last()}", headers)
+    override fun pageListRequest(chapter: SChapter) = GET("$apiUrl/${getPathFromUrl(chapter.url)}}", headers)
 
     override fun pageListParse(response: Response): List<Page> {
         val bytes = response.body.bytes()
         val data = msgPack.decodeFromByteArray<Entry>(bytes)
 
-        return data.data.mapIndexed { i, img -> Page(i, imageUrl = "$cdnUrl/${data.id}/${data.key}/${data.hash}/b/${img.name}") }
+        return data.data.mapIndexed { i, img -> Page(i, url = "$cdnUrl/${data.id}/${data.key}/${data.hash}/b/${img.name}") }
+    }
+
+    override fun fetchImageUrl(page: Page): Observable<String> {
+        val imageQuality = if (preferences.getBoolean(IMAGE_QUALITY_PREF, false)) "a" else "b"
+
+        return Observable.just(page.url.replace("/b/", "/$imageQuality/"))
     }
 
     override fun imageUrlParse(response: Response) = throw UnsupportedOperationException("Not used")
+
+    // Settings
+
+    override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        val imageQualityPref = androidx.preference.SwitchPreferenceCompat(screen.context).apply {
+            key = IMAGE_QUALITY_PREF
+            title = "Use original images"
+            summary = getPrefSummary(preferences.getBoolean(IMAGE_QUALITY_PREF, false)).plus("\nCurrently unavailable to avoid being blocked")
+            // FIXME: Resampled images are about 500KB while originals are up to 5MB - Using only resampled for now to avoid being blocked
+            setEnabled(false)
+            setDefaultValue(false)
+
+            setOnPreferenceChangeListener { _, newValue ->
+                try {
+                    summary = getPrefSummary(newValue.toString().toBoolean())
+                    true
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    false
+                }
+            }
+        }
+
+        screen.addPreference(imageQualityPref)
+    }
 
     override fun getFilterList() = FilterList(
         CategoryGroup(),
         SortFilter(),
     )
+
+    private fun getPrefSummary(value: Boolean): String {
+        return if (value) {
+            "Currently using original images"
+        } else {
+            "Currently using resampled images"
+        }
+    }
+
+    private fun getPathFromUrl(url: String) = "${url.split("/").reversed()[1]}/${url.split("/").last()}"
 
     private class CategoryFilter(name: String) : Filter.CheckBox(name, false)
 
@@ -178,4 +233,8 @@ class Anchira : HttpSource() {
         arrayOf("Title", "Pages", "Date published", "Date uploaded", "Popularity"),
         Selection(2, false),
     )
+
+    companion object {
+        private const val IMAGE_QUALITY_PREF = "imageQualityPref"
+    }
 }
