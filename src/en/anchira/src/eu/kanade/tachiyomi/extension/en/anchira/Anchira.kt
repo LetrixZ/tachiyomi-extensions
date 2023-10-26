@@ -158,6 +158,8 @@ class Anchira : HttpSource(), ConfigurableSource {
         )
     }
 
+    override fun getChapterUrl(chapter: SChapter) = "$baseUrl/g/${getPathFromUrl(chapter.url)}"
+
     // Page List
 
     override fun pageListRequest(chapter: SChapter) = GET("$apiUrl/${getPathFromUrl(chapter.url)}", headers)
