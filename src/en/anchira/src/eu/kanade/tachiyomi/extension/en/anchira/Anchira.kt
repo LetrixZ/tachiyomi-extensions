@@ -72,8 +72,9 @@ class Anchira : HttpSource(), ConfigurableSource {
                         artist = it.tags.filter { it.namespace == 1 }.joinToString(", ") { it.name }
                         author = it.tags.filter { it.namespace == 2 }.joinToString(", ") { it.name }
                         genre = it.tags.filter { it.namespace != 1 && it.namespace != 2 }.sortedBy { it.namespace }.joinToString(", ") { it.name }
-                        initialized = true
                         update_strategy = UpdateStrategy.ONLY_FETCH_ONCE
+                        status = SManga.COMPLETED
+                        initialized = true
                     }
                 }.toList(),
                 data.entries.size < data.total,
@@ -138,7 +139,23 @@ class Anchira : HttpSource(), ConfigurableSource {
 
     // Details
 
-    override fun mangaDetailsParse(response: Response) = throw UnsupportedOperationException("Not used")
+    override fun mangaDetailsRequest(manga: SManga) = GET("$apiUrl/${getPathFromUrl(manga.url)}", headers)
+
+    override fun mangaDetailsParse(response: Response): SManga {
+        val bytes = response.body.bytes()
+        val data = msgPack.decodeFromByteArray<Entry>(bytes)
+
+        return SManga.create().apply {
+            url = "/g/${data.id}/${data.key}"
+            title = data.title
+            thumbnail_url = "$cdnUrl/${data.id}/${data.key}/m/${data.data[data.thumbnailIndex].name}"
+            artist = data.tags.filter { it.namespace == 1 }.joinToString(", ") { it.name }
+            author = data.tags.filter { it.namespace == 2 }.joinToString(", ") { it.name }
+            genre = data.tags.filter { it.namespace != 1 && it.namespace != 2 }.sortedBy { it.namespace }.joinToString(", ") { it.name }
+            update_strategy = UpdateStrategy.ONLY_FETCH_ONCE
+            status = SManga.COMPLETED
+        }
+    }
 
     // Chapter
 
