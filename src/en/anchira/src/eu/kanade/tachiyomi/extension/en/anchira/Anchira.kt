@@ -4,8 +4,6 @@ import android.app.Application
 import android.content.SharedPreferences
 import androidx.preference.PreferenceScreen
 import androidx.preference.SwitchPreferenceCompat
-import com.ensarsarajcic.kotlinx.serialization.msgpack.MsgPack
-import com.ensarsarajcic.kotlinx.serialization.msgpack.MsgPackConfiguration
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.ConfigurableSource
@@ -17,7 +15,8 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import eu.kanade.tachiyomi.source.online.HttpSource
-import kotlinx.serialization.decodeFromByteArray
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
@@ -28,13 +27,11 @@ import uy.kohesive.injekt.api.get
 import java.util.concurrent.TimeUnit
 
 class Anchira : HttpSource(), ConfigurableSource {
-    private val msgPack = MsgPack(configuration = MsgPackConfiguration(ignoreUnknownKeys = true))
-
     override val name = "Anchira"
 
     override val baseUrl = "https://anchira.to"
 
-    private val apiUrl = "$baseUrl/api/v1/library"
+    private val apiUrl = "{{API_URL}}"
 
     private val cdnUrl = "https://kisakisexo.xyz"
 
@@ -59,8 +56,8 @@ class Anchira : HttpSource(), ConfigurableSource {
     override fun latestUpdatesRequest(page: Int) = GET("$apiUrl?page=$page", headers)
 
     override fun latestUpdatesParse(response: Response): MangasPage {
-        val bytes = response.body.bytes()
-        val data = msgPack.decodeFromByteArray<LibraryResponse>(bytes)
+        val json = response.body.string()
+        val data = Json.decodeFromString<LibraryResponse>(json)
 
         return if (data.entries != null) {
             MangasPage(
@@ -68,16 +65,10 @@ class Anchira : HttpSource(), ConfigurableSource {
                     SManga.create().apply {
                         url = "/g/${it.id}/${it.key}"
                         title = it.title
-                        thumbnail_url = "$cdnUrl/${it.id}/${it.key}/m/${it.cover.name}"
-                        artist = it.tags.filter { it.namespace == 1 }.joinToString(", ") { it.name }
-                        author = it.tags.filter { it.namespace == 2 }.joinToString(", ") { it.name }
-                        genre = it.tags.filter { it.namespace != 1 && it.namespace != 2 }.sortedBy { it.namespace }.joinToString(", ") { it.name }
-                        update_strategy = UpdateStrategy.ONLY_FETCH_ONCE
-                        status = SManga.COMPLETED
-                        initialized = true
+                        thumbnail_url = it.thumbnailUrl
                     }
                 }.toList(),
-                data.entries.size < data.total,
+                data.hasNextPage,
             )
         } else {
             MangasPage(listOf(), false)
@@ -139,37 +130,41 @@ class Anchira : HttpSource(), ConfigurableSource {
 
     // Details
 
-    override fun mangaDetailsRequest(manga: SManga) = GET("$apiUrl/${getPathFromUrl(manga.url)}", headers)
+    override fun mangaDetailsRequest(manga: SManga) =
+        GET("$apiUrl/${getPathFromUrl(manga.url)}", headers)
 
     override fun mangaDetailsParse(response: Response): SManga {
-        val bytes = response.body.bytes()
-        val data = msgPack.decodeFromByteArray<Entry>(bytes)
+        val json = response.body.string()
+        val data = Json.decodeFromString<Entry>(json)
 
         return SManga.create().apply {
             url = "/g/${data.id}/${data.key}"
             title = data.title
-            thumbnail_url = "$cdnUrl/${data.id}/${data.key}/m/${data.data[data.thumbnailIndex].name}"
-            artist = data.tags.filter { it.namespace == 1 }.joinToString(", ") { it.name }
-            author = data.tags.filter { it.namespace == 2 }.joinToString(", ") { it.name }
-            genre = data.tags.filter { it.namespace != 1 && it.namespace != 2 }.sortedBy { it.namespace }.joinToString(", ") { it.name }
+            thumbnail_url = data.thumbnailUrl
+            artist = data.artist
+            author = data.circle
+            genre = data.tags
             update_strategy = UpdateStrategy.ONLY_FETCH_ONCE
             status = SManga.COMPLETED
         }
     }
 
+    override fun getMangaUrl(manga: SManga) = "$baseUrl/${manga.url}"
+
     // Chapter
 
-    override fun chapterListRequest(manga: SManga) = GET("$apiUrl/${getPathFromUrl(manga.url)}", headers)
+    override fun chapterListRequest(manga: SManga) =
+        GET("$apiUrl/${getPathFromUrl(manga.url)}", headers)
 
     override fun chapterListParse(response: Response): List<SChapter> {
-        val bytes = response.body.bytes()
-        val data = msgPack.decodeFromByteArray<Entry>(bytes)
+        val json = response.body.string()
+        val data = Json.decodeFromString<Entry>(json)
 
         return listOf(
             SChapter.create().apply {
                 url = "/g/${data.id}/${data.key}"
                 name = "Chapter"
-                date_upload = data.publishedAt
+                date_upload = data.published
                 chapter_number = 1f
             },
         )
@@ -179,13 +174,19 @@ class Anchira : HttpSource(), ConfigurableSource {
 
     // Page List
 
-    override fun pageListRequest(chapter: SChapter) = GET("$apiUrl/${getPathFromUrl(chapter.url)}", headers)
+    override fun pageListRequest(chapter: SChapter) =
+        GET("$apiUrl/${getPathFromUrl(chapter.url)}", headers)
 
     override fun pageListParse(response: Response): List<Page> {
-        val bytes = response.body.bytes()
-        val data = msgPack.decodeFromByteArray<Entry>(bytes)
+        val json = response.body.string()
+        val data = Json.decodeFromString<Entry>(json)
 
-        return data.data.mapIndexed { i, img -> Page(i, imageUrl = "$cdnUrl/${data.id}/${data.key}/${data.hash}/b/${img.name}") }
+        return data.pages.mapIndexed { i, img ->
+            Page(
+                i,
+                imageUrl = "$cdnUrl/${data.id}/${data.key}/${data.hash}/b/$img",
+            )
+        }
     }
 
     override fun imageRequest(page: Page): Request {
@@ -202,7 +203,12 @@ class Anchira : HttpSource(), ConfigurableSource {
         val imageQualityPref = SwitchPreferenceCompat(screen.context).apply {
             key = IMAGE_QUALITY_PREF
             title = "Use original images"
-            summary = getPrefSummary(preferences.getBoolean(IMAGE_QUALITY_PREF, false)).plus("\nCurrently unavailable to avoid being blocked")
+            summary = getPrefSummary(
+                preferences.getBoolean(
+                    IMAGE_QUALITY_PREF,
+                    false,
+                ),
+            ).plus("\nCurrently unavailable to avoid being blocked")
             // FIXME: Resampled images are about 500KB while originals are up to 5MB - Using only resampled for now to avoid being blocked
             setEnabled(false)
             setDefaultValue(false)
@@ -234,11 +240,15 @@ class Anchira : HttpSource(), ConfigurableSource {
         }
     }
 
-    private fun getPathFromUrl(url: String) = "${url.split("/").reversed()[1]}/${url.split("/").last()}"
+    private fun getPathFromUrl(url: String) =
+        "${url.split("/").reversed()[1]}/${url.split("/").last()}"
 
     private class CategoryFilter(name: String) : Filter.CheckBox(name, false)
 
-    private class CategoryGroup : Filter.Group<CategoryFilter>("Categories", listOf("Manga", "Doujinshi", "Illustration").map { CategoryFilter(it) })
+    private class CategoryGroup : Filter.Group<CategoryFilter>(
+        "Categories",
+        listOf("Manga", "Doujinshi", "Illustration").map { CategoryFilter(it) },
+    )
 
     private class SortFilter : Filter.Sort(
         "Sort",
