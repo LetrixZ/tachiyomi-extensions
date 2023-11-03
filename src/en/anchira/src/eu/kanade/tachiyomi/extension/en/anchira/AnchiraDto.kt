@@ -41,4 +41,5 @@ data class Entry(
     val hash: String,
     val data: List<Image>,
     val tags: List<Tag>,
+    val url: String? = null,
 )
