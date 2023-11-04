@@ -7,11 +7,9 @@ import kotlinx.serialization.Serializable
 data class ListEntry(
     val id: Int,
     val key: String,
-    val hash: String,
     val title: String,
-    val pages: Int,
     val cover: Image,
-    val tags: List<Tag>,
+    val tags: List<Tag> = emptyList(),
 )
 
 @Serializable
@@ -40,6 +38,6 @@ data class Entry(
     @SerialName("thumb_index") val thumbnailIndex: Int,
     val hash: String,
     val data: List<Image>,
-    val tags: List<Tag>,
+    val tags: List<Tag> = emptyList(),
     val url: String? = null,
 )

@@ -7,8 +7,8 @@ import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import androidx.preference.SwitchPreferenceCompat
-import com.ensarsarajcic.kotlinx.serialization.msgpack.MsgPack
-import com.ensarsarajcic.kotlinx.serialization.msgpack.MsgPackConfiguration
+import eu.kanade.tachiyomi.extension.en.anchira.AnchiraHelper.decodeBytes
+import eu.kanade.tachiyomi.extension.en.anchira.AnchiraHelper.getPathFromUrl
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
@@ -21,25 +21,22 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import eu.kanade.tachiyomi.source.online.HttpSource
-import kotlinx.serialization.decodeFromByteArray
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.Cookie
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
-import okhttp3.ResponseBody.Companion.toResponseBody
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 class Anchira : HttpSource(), ConfigurableSource {
-    private val msgPack = MsgPack(configuration = MsgPackConfiguration(ignoreUnknownKeys = true))
-
     override val name = "Anchira"
 
     override val baseUrl = "https://anchira.to"
@@ -74,8 +71,7 @@ class Anchira : HttpSource(), ConfigurableSource {
     override fun latestUpdatesRequest(page: Int) = GET("$libraryUrl?page=$page", headers)
 
     override fun latestUpdatesParse(response: Response): MangasPage {
-        val bytes = response.body.bytes()
-        val data = msgPack.decodeFromByteArray<LibraryResponse>(bytes)
+        val data = decodeBytes<LibraryResponse>(response.body.bytes(), preferences.useExternalAPI)
 
         return if (data.entries != null) {
             MangasPage(
@@ -168,8 +164,7 @@ class Anchira : HttpSource(), ConfigurableSource {
         GET("$libraryUrl/${getPathFromUrl(manga.url)}", headers)
 
     override fun mangaDetailsParse(response: Response): SManga {
-        val bytes = response.body.bytes()
-        val data = msgPack.decodeFromByteArray<Entry>(bytes)
+        val data = decodeBytes<Entry>(response.body.bytes(), preferences.useExternalAPI)
 
         return SManga.create().apply {
             url = "/g/${data.id}/${data.key}"
@@ -183,7 +178,7 @@ class Anchira : HttpSource(), ConfigurableSource {
             update_strategy = UpdateStrategy.ONLY_FETCH_ONCE
             status = SManga.COMPLETED
         }.also {
-            preferences.edit().putString(it.url, data.url).commit()
+            preferences.edit().putString(it.url, data.url).apply()
         }
     }
 
@@ -199,8 +194,7 @@ class Anchira : HttpSource(), ConfigurableSource {
         GET("$libraryUrl/${getPathFromUrl(manga.url)}", headers)
 
     override fun chapterListParse(response: Response): List<SChapter> {
-        val bytes = response.body.bytes()
-        val data = msgPack.decodeFromByteArray<Entry>(bytes)
+        val data = decodeBytes<Entry>(response.body.bytes(), preferences.useExternalAPI)
 
         return listOf(
             SChapter.create().apply {
@@ -220,8 +214,7 @@ class Anchira : HttpSource(), ConfigurableSource {
         GET("$libraryUrl/${getPathFromUrl(chapter.url)}", headers)
 
     override fun pageListParse(response: Response): List<Page> {
-        val bytes = response.body.bytes()
-        val data = msgPack.decodeFromByteArray<Entry>(bytes)
+        val data = decodeBytes<Entry>(response.body.bytes(), preferences.useExternalAPI)
 
         return data.data.mapIndexed { i, img ->
             Page(i, imageUrl = "$cdnUrl/${data.id}/${data.key}/${data.hash}/b/${img.name}")
@@ -244,6 +237,7 @@ class Anchira : HttpSource(), ConfigurableSource {
             entryValues = arrayOf("a", "b")
             setDefaultValue("b")
             summary = "%s"
+            setEnabled(false)
         }
 
         val openSourcePref = SwitchPreferenceCompat(screen.context).apply {
@@ -252,6 +246,26 @@ class Anchira : HttpSource(), ConfigurableSource {
             summary =
                 "Enable to open the original source (when available) of the book when opening manga or chapter on WebView."
             setDefaultValue(false)
+        }
+
+        val useExternalApiPref = SwitchPreferenceCompat(screen.context).apply {
+            key = USE_EXTERNAL_API_PREF
+            title = "Use external API"
+            summary =
+                "Enable to use an external unofficial API instead of the official Anchira API. Required in case the official one is unavailable."
+            setDefaultValue(false)
+        }
+
+        val externalApiUrlPref = EditTextPreference(screen.context).apply {
+            key = EXTERNAL_API_URL_PREF
+            title = "External API URL"
+            summary = preferences.externalAPI.ifBlank { "Enter external API URL" }
+
+            setOnPreferenceChangeListener { _, newValue ->
+                summary = (newValue as String).ifBlank { "Enter external API URL" }
+
+                true
+            }
         }
 
         val usernamePref = EditTextPreference(screen.context).apply {
@@ -290,7 +304,13 @@ class Anchira : HttpSource(), ConfigurableSource {
         val passwordPref = EditTextPreference(screen.context).apply {
             key = PASSWORD_PREF
             title = "Password"
-            summary = if (preferences.password.isBlank()) "Enter your password" else "*".repeat(preferences.password.length)
+            summary = if (preferences.password.isBlank()) {
+                "Enter your password"
+            } else {
+                "*".repeat(
+                    preferences.password.length,
+                )
+            }
 
             setOnBindEditTextListener {
                 it.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
@@ -310,6 +330,8 @@ class Anchira : HttpSource(), ConfigurableSource {
 
         screen.addPreference(imageQualityPref)
         screen.addPreference(openSourcePref)
+        screen.addPreference(useExternalApiPref)
+        screen.addPreference(externalApiUrlPref)
         screen.addPreference(useEmailPref)
         screen.addPreference(usernamePref)
         screen.addPreference(passwordPref)
@@ -320,24 +342,6 @@ class Anchira : HttpSource(), ConfigurableSource {
         SortFilter(),
         FavoritesFilter(),
     )
-
-    private val SharedPreferences.imageQuality
-        get() = getString(IMAGE_QUALITY_PREF, "b")!!
-
-    private val SharedPreferences.openSource
-        get() = getBoolean(OPEN_SOURCE_PREF, false)
-
-    private val SharedPreferences.useEmail
-        get() = getBoolean(USE_EMAIL_PREF, false)
-
-    private val SharedPreferences.username
-        get() = getString(USERNAME_PREF, "")!!
-
-    private val SharedPreferences.password
-        get() = getString(PASSWORD_PREF, "")!!
-
-    private fun getPathFromUrl(url: String) =
-        "${url.split("/").reversed()[1]}/${url.split("/").last()}"
 
     private class CategoryFilter(name: String) : Filter.CheckBox(name, false)
 
@@ -356,79 +360,26 @@ class Anchira : HttpSource(), ConfigurableSource {
         Selection(2, false),
     )
 
-    private fun decode(buf: ByteArray): ByteArray {
-        val padSize = buf.size / 2
-        val pad = buf.copyOfRange(0, padSize)
-        val data = buf.copyOfRange(padSize, buf.size)
+    private val SharedPreferences.imageQuality
+        get() = getString(IMAGE_QUALITY_PREF, "b")!!
 
-        for (i in 0 until padSize) {
-            data[i] = (data[i].toInt() xor pad[i].toInt()).toByte()
-        }
+    private val SharedPreferences.openSource
+        get() = getBoolean(OPEN_SOURCE_PREF, false)
 
-        return data
-    }
+    private val SharedPreferences.useExternalAPI
+        get() = getBoolean(USE_EXTERNAL_API_PREF, false)
 
-    private fun clearCookies() {
-        val baseHttpUrl = baseUrl.toHttpUrl()
-        val cookies = client.cookieJar.loadForRequest(baseHttpUrl)
-        val obsoletedCookies = cookies.map {
-            val cookie = Cookie.parse(baseHttpUrl, "${it.name}=; Max-Age=-1")!!
-            cookie
-        }
-        client.cookieJar.saveFromResponse(baseHttpUrl, obsoletedCookies)
-        authCookie = ""
-    }
+    private val SharedPreferences.externalAPI
+        get() = getString(EXTERNAL_API_URL_PREF, "")!!
 
-    private fun getSource(manga: SManga) =
-        preferences.getString(manga.url, null) ?: "$baseUrl${manga.url}"
+    private val SharedPreferences.useEmail
+        get() = getBoolean(USE_EMAIL_PREF, false)
 
-    private fun apiInterceptor(chain: Interceptor.Chain): Response {
-        val request = chain.request()
-        val requestUrl = request.url.toString()
+    private val SharedPreferences.username
+        get() = getString(USERNAME_PREF, "")!!
 
-        return if (requestUrl.contains("/api/v1")) {
-            val newRequestBuilder = request.newBuilder()
-
-            if (requestUrl.contains(Regex("/\\d+/\\S+"))) {
-                newRequestBuilder.header(
-                    "Referer",
-                    requestUrl.replace(libraryUrl, "$baseUrl/g"),
-                )
-            } else if (requestUrl.contains("user/favorites")) {
-                newRequestBuilder.header(
-                    "Referer",
-                    requestUrl.replace("$apiUrl/user/favorites", "$baseUrl/favorites"),
-                )
-            } else {
-                newRequestBuilder.header("Referer", requestUrl.replace(libraryUrl, baseUrl))
-            }
-
-            val newRequest = newRequestBuilder.build()
-            val response = chain.proceed(newRequest)
-            val decodedBody = decode(response.body.bytes())
-            response.newBuilder().body(
-                decodedBody.toResponseBody(response.body.contentType()),
-            ).build()
-        } else {
-            chain.proceed(request)
-        }
-    }
-
-    private fun authInterceptor(chain: Interceptor.Chain): Response {
-        val request = chain.request()
-
-        if (!request.url.toString().contains("/user/")) {
-            return chain.proceed(request)
-        }
-
-        if (authCookie.isBlank()) {
-            login(chain)
-        }
-
-        val authRequest = request.newBuilder().addHeader("Cookie", authCookie).build()
-
-        return chain.proceed(authRequest)
-    }
+    private val SharedPreferences.password
+        get() = getString(PASSWORD_PREF, "")!!
 
     private fun login(chain: Interceptor.Chain) {
         if (preferences.username.isBlank() || preferences.password.isBlank()) {
@@ -450,14 +401,114 @@ class Anchira : HttpSource(), ConfigurableSource {
             throw IOException("Login failed")
         }
 
-        authCookie = response.header("Set-Cookie")!!
+        setAuthCookie()
 
         response.close()
+    }
+
+    private fun apiInterceptor(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        val requestUrl = request.url.toString()
+
+        return if (requestUrl.contains("/api/v1")) {
+            val newRequestBuilder = request.newBuilder()
+            newRequestBuilder.header("ngrok-skip-browser-warning", "546")
+
+            if (preferences.useExternalAPI) {
+                preferences.externalAPI.toHttpUrlOrNull()
+                    ?: throw IOException("Invalid external API URL")
+                newRequestBuilder.url(requestUrl.replace(baseUrl, preferences.externalAPI))
+            }
+
+            if (requestUrl.contains(Regex("/\\d+/\\S+"))) {
+                newRequestBuilder.header(
+                    "Referer",
+                    requestUrl.replace(libraryUrl, "$baseUrl/g"),
+                )
+            } else if (requestUrl.contains("user/favorites")) {
+                newRequestBuilder.header(
+                    "Referer",
+                    requestUrl.replace("$apiUrl/user/favorites", "$baseUrl/favorites"),
+                )
+            } else {
+                newRequestBuilder.header("Referer", requestUrl.replace(libraryUrl, baseUrl))
+            }
+
+            chain.proceed(newRequestBuilder.build())
+        } else {
+            chain.proceed(request)
+        }
+    }
+
+    private fun authInterceptor(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+
+        if (!request.url.toString().contains("/user/")) {
+            return chain.proceed(request)
+        }
+
+        if (authCookie.isBlank()) {
+            login(chain)
+        }
+
+        val authRequest = request.newBuilder().addHeader("Cookie", authCookie).build()
+
+        return chain.proceed(authRequest)
+    }
+
+    private fun setAuthCookie() {
+        val cookies = client.cookieJar.loadForRequest(baseUrl.toHttpUrl())
+        cookies.find { it.name == "session" }?.let { authCookie = it.value }
+
+        if (authCookie.isBlank() || !preferences.useExternalAPI) {
+            return
+        }
+
+        val url = preferences.externalAPI.toHttpUrlOrNull() ?: return
+        val cookieExpire = AnchiraHelper.formattedTomorrowDate()
+        val cookie = Cookie.parse(
+            url,
+            "session=$authCookie; Path=/; Expires=$cookieExpire; HttpOnly; Secure; SameSite=Lax",
+        )!!
+        client.cookieJar.saveFromResponse(url, listOf(cookie))
+    }
+
+    private fun clearCookies() {
+        authCookie = ""
+
+        val url = baseUrl.toHttpUrl()
+        val cookies = client.cookieJar.loadForRequest(url)
+        val obsoletedCookies = cookies.map {
+            val cookie = Cookie.parse(url, "${it.name}=; Max-Age=-1")!!
+            cookie
+        }
+        client.cookieJar.saveFromResponse(url, obsoletedCookies)
+
+        clearExternalCookies()
+    }
+
+    private fun clearExternalCookies() {
+        val url = preferences.externalAPI.toHttpUrlOrNull() ?: return
+        val cookies = client.cookieJar.loadForRequest(url)
+        val obsoletedCookies = cookies.map {
+            val cookie = Cookie.parse(url, "${it.name}=; Max-Age=-1")!!
+            cookie
+        }
+        client.cookieJar.saveFromResponse(url, obsoletedCookies)
+    }
+
+    private fun getSource(manga: SManga) =
+        preferences.getString(manga.url, null) ?: "$baseUrl${manga.url}"
+
+    init {
+        setAuthCookie()
     }
 
     companion object {
         private const val IMAGE_QUALITY_PREF = "image_quality"
         private const val OPEN_SOURCE_PREF = "use_manga_source"
+        private const val USE_EXTERNAL_API_PREF = "use_external_api"
+        private const val EXTERNAL_API_URL_PREF = "external_api_url"
         private const val USE_EMAIL_PREF = "use_email"
         private const val USERNAME_PREF = "username"
         private const val PASSWORD_PREF = "password"
