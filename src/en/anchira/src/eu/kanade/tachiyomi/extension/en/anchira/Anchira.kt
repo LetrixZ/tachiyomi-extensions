@@ -200,7 +200,7 @@ class Anchira : HttpSource(), ConfigurableSource {
             SChapter.create().apply {
                 url = "/g/${data.id}/${data.key}"
                 name = "Chapter"
-                date_upload = data.publishedAt
+                date_upload = data.publishedAt * 1000
                 chapter_number = 1f
             },
         )
@@ -248,22 +248,28 @@ class Anchira : HttpSource(), ConfigurableSource {
             setDefaultValue(false)
         }
 
+        val externalApiUrlPref = EditTextPreference(screen.context).apply {
+            key = EXTERNAL_API_URL_PREF
+            title = "External API URL"
+            summary = preferences.externalAPI.ifBlank { "Enter external API URL" }
+            setEnabled(preferences.useExternalAPI)
+
+            setOnPreferenceChangeListener { _, newValue ->
+                summary = (newValue as String).ifBlank { "Enter external API URL" }
+
+                true
+            }
+        }
+
         val useExternalApiPref = SwitchPreferenceCompat(screen.context).apply {
             key = USE_EXTERNAL_API_PREF
             title = "Use external API"
             summary =
                 "Enable to use an external unofficial API instead of the official Anchira API. Required in case the official one is unavailable."
             setDefaultValue(false)
-        }
-
-        val externalApiUrlPref = EditTextPreference(screen.context).apply {
-            key = EXTERNAL_API_URL_PREF
-            title = "External API URL"
-            summary = preferences.externalAPI.ifBlank { "Enter external API URL" }
 
             setOnPreferenceChangeListener { _, newValue ->
-                summary = (newValue as String).ifBlank { "Enter external API URL" }
-
+                externalApiUrlPref.setEnabled(newValue as Boolean)
                 true
             }
         }
