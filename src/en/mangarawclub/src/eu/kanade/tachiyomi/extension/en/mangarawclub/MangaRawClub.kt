@@ -46,7 +46,7 @@ class MangaRawClub : ParsedHttpSource() {
 
     override fun searchMangaSelector() = "ul.novel-list > li.novel-item"
     override fun popularMangaSelector() = searchMangaSelector()
-    override fun latestUpdatesSelector() = searchMangaSelector()
+    override fun latestUpdatesSelector() = "ul.novel-list.chapters > li.novel-item"
 
     override fun searchMangaFromElement(element: Element): SManga {
         val manga = SManga.create()

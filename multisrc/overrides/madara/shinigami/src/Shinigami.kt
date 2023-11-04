@@ -4,7 +4,6 @@ import eu.kanade.tachiyomi.multisrc.madara.Madara
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.SChapter
 import okhttp3.Headers
-import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import org.jsoup.nodes.Element
 import java.util.concurrent.TimeUnit
@@ -19,15 +18,11 @@ class Shinigami : Madara("Shinigami", "https://shinigami.sh", "id") {
         .build()
 
     override fun headersBuilder(): Headers.Builder = super.headersBuilder()
-        .add("Referer", "$baseUrl/")
         .add("Sec-Fetch-Dest", "document")
         .add("Sec-Fetch-Mode", "navigate")
         .add("Sec-Fetch-Site", "same-origin")
         .add("Upgrade-Insecure-Requests", "1")
-        .add("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/$randomVersionNumber.0.0.0 Mobile Safari/537.3")
         .add("X-Requested-With", randomString)
-
-    private val randomVersionNumber = Random.Default.nextInt(112, 118)
 
     private fun generateRandomString(length: Int): String {
         val charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ.abcdefghijklmnopqrstuvwxyz.0123456789"
@@ -53,10 +48,7 @@ class Shinigami : Madara("Shinigami", "https://shinigami.sh", "id") {
         date_upload = urlElement.selectFirst("span.chapter-release-date > i")?.text()
             .let { parseChapterDate(it) }
 
-        val fixedUrl = urlElement.attr("abs:href").toHttpUrl().newBuilder()
-            .removeAllQueryParameters("style")
-            .addQueryParameter("style", "list")
-            .toString()
+        val fixedUrl = urlElement.attr("abs:href")
 
         setUrlWithoutDomain(fixedUrl)
     }
