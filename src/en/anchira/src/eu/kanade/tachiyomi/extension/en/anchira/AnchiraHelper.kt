@@ -11,8 +11,9 @@ import java.util.Locale
 import java.util.TimeZone
 
 object AnchiraHelper {
-    private val formatterDate = SimpleDateFormat("EEE, dd-MMM-yyyy HH:mm:ss zzz", Locale.US)
-        .apply { timeZone = TimeZone.getTimeZone("GMT") }
+    private val formatterDate = SimpleDateFormat("EEE, dd-MMM-yyyy HH:mm:ss zzz", Locale.US).apply {
+        timeZone = TimeZone.getTimeZone("GMT")
+    }
 
     val msgPack = MsgPack(configuration = MsgPackConfiguration(ignoreUnknownKeys = true))
     val json = Json { ignoreUnknownKeys = true }
@@ -43,4 +44,27 @@ object AnchiraHelper {
 
         return data
     }
+
+    fun prepareTags(tags: List<Tag>, group: Boolean) = tags.map {
+        if (it.namespace == null) {
+            it.namespace = 6
+        }
+        it
+    }
+        .sortedBy { it.namespace }
+        .map {
+            val tag = it.name.lowercase()
+            return@map if (group) {
+                when (it.namespace) {
+                    1 -> "artist:$tag"
+                    2 -> "circle:$tag"
+                    3 -> "parody:$tag"
+                    4 -> "magazine:$tag"
+                    else -> "tag:$tag"
+                }
+            } else {
+                tag
+            }
+        }
+        .joinToString(", ") { it }
 }

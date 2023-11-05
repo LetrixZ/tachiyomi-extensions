@@ -9,6 +9,7 @@ import androidx.preference.PreferenceScreen
 import androidx.preference.SwitchPreferenceCompat
 import eu.kanade.tachiyomi.extension.en.anchira.AnchiraHelper.decodeBytes
 import eu.kanade.tachiyomi.extension.en.anchira.AnchiraHelper.getPathFromUrl
+import eu.kanade.tachiyomi.extension.en.anchira.AnchiraHelper.prepareTags
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
@@ -82,8 +83,7 @@ class Anchira : HttpSource(), ConfigurableSource {
                         thumbnail_url = "$cdnUrl/${it.id}/${it.key}/m/${it.cover.name}"
                         artist = it.tags.filter { it.namespace == 1 }.joinToString(", ") { it.name }
                         author = it.tags.filter { it.namespace == 2 }.joinToString(", ") { it.name }
-                        genre = it.tags.filter { it.namespace != 1 && it.namespace != 2 }
-                            .sortedBy { it.namespace }.joinToString(", ") { it.name }
+                        genre = prepareTags(it.tags, preferences.useTagGrouping)
                         update_strategy = UpdateStrategy.ONLY_FETCH_ONCE
                         status = SManga.COMPLETED
                         initialized = false
@@ -173,8 +173,7 @@ class Anchira : HttpSource(), ConfigurableSource {
                 "$cdnUrl/${data.id}/${data.key}/m/${data.data[data.thumbnailIndex].name}"
             artist = data.tags.filter { it.namespace == 1 }.joinToString(", ") { it.name }
             author = data.tags.filter { it.namespace == 2 }.joinToString(", ") { it.name }
-            genre = data.tags.filter { it.namespace != 1 && it.namespace != 2 }
-                .sortedBy { it.namespace }.joinToString(", ") { it.name }
+            genre = prepareTags(data.tags, preferences.useTagGrouping)
             update_strategy = UpdateStrategy.ONLY_FETCH_ONCE
             status = SManga.COMPLETED
         }.also {
@@ -245,6 +244,14 @@ class Anchira : HttpSource(), ConfigurableSource {
             title = "Open original source site in WebView"
             summary =
                 "Enable to open the original source (when available) of the book when opening manga or chapter on WebView."
+            setDefaultValue(false)
+        }
+
+        val useTagGrouping = SwitchPreferenceCompat(screen.context).apply {
+            key = USE_TAG_GROUPING
+            title = "Group tags"
+            summary =
+                "Enable to group tags togheter by artist, circle, parody, magazine and general tags"
             setDefaultValue(false)
         }
 
@@ -336,6 +343,7 @@ class Anchira : HttpSource(), ConfigurableSource {
 
         screen.addPreference(imageQualityPref)
         screen.addPreference(openSourcePref)
+        screen.addPreference(useTagGrouping)
         screen.addPreference(useExternalApiPref)
         screen.addPreference(externalApiUrlPref)
         screen.addPreference(useEmailPref)
@@ -371,6 +379,9 @@ class Anchira : HttpSource(), ConfigurableSource {
 
     private val SharedPreferences.openSource
         get() = getBoolean(OPEN_SOURCE_PREF, false)
+
+    private val SharedPreferences.useTagGrouping
+        get() = getBoolean(USE_TAG_GROUPING, false)
 
     private val SharedPreferences.useExternalAPI
         get() = getBoolean(USE_EXTERNAL_API_PREF, false)
@@ -513,6 +524,7 @@ class Anchira : HttpSource(), ConfigurableSource {
     companion object {
         private const val IMAGE_QUALITY_PREF = "image_quality"
         private const val OPEN_SOURCE_PREF = "use_manga_source"
+        private const val USE_TAG_GROUPING = "use_tag_grouping"
         private const val USE_EXTERNAL_API_PREF = "use_external_api"
         private const val EXTERNAL_API_URL_PREF = "external_api_url"
         private const val USE_EMAIL_PREF = "use_email"

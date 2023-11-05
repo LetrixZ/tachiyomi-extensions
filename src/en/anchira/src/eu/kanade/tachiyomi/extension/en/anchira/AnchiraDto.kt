@@ -19,8 +19,8 @@ data class Image(
 
 @Serializable
 data class Tag(
-    val name: String,
-    val namespace: Int? = null,
+    var name: String,
+    var namespace: Int? = null,
 )
 
 @Serializable
