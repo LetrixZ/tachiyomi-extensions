@@ -181,11 +181,7 @@ class Anchira : HttpSource(), ConfigurableSource {
         }
     }
 
-    override fun getMangaUrl(manga: SManga) = if (preferences.openSource) {
-        getSource(manga)
-    } else {
-        "$baseUrl${manga.url}"
-    }
+    override fun getMangaUrl(manga: SManga) = "$baseUrl${manga.url}"
 
     // Chapter
 
@@ -358,9 +354,6 @@ class Anchira : HttpSource(), ConfigurableSource {
 
     private val SharedPreferences.imageQuality
         get() = getString(IMAGE_QUALITY_PREF, "b")!!
-
-    private val SharedPreferences.openSource
-        get() = getBoolean(OPEN_SOURCE_PREF, false)
 
     private val SharedPreferences.useTagGrouping
         get() = getBoolean(USE_TAG_GROUPING, false)
