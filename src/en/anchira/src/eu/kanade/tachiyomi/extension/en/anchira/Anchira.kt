@@ -42,7 +42,7 @@ class Anchira : HttpSource(), ConfigurableSource {
 
     override val baseUrl = "https://anchira.to"
 
-    private val apiUrl = "$baseUrl/api/v1"
+    private val apiUrl = "$baseUrl/api/v3"
 
     private val libraryUrl = "$apiUrl/library"
 
@@ -239,22 +239,6 @@ class Anchira : HttpSource(), ConfigurableSource {
             setEnabled(false)
         }
 
-        val openSourcePref = SwitchPreferenceCompat(screen.context).apply {
-            key = OPEN_SOURCE_PREF
-            title = "Open original source site in WebView"
-            summary =
-                "Enable to open the original source (when available) of the book when opening manga or chapter on WebView."
-            setDefaultValue(false)
-        }
-
-        val useTagGrouping = SwitchPreferenceCompat(screen.context).apply {
-            key = USE_TAG_GROUPING
-            title = "Group tags"
-            summary =
-                "Enable to group tags togheter by artist, circle, parody, magazine and general tags"
-            setDefaultValue(false)
-        }
-
         val externalApiUrlPref = EditTextPreference(screen.context).apply {
             key = EXTERNAL_API_URL_PREF
             title = "External API URL"
@@ -342,8 +326,6 @@ class Anchira : HttpSource(), ConfigurableSource {
         }
 
         screen.addPreference(imageQualityPref)
-        screen.addPreference(openSourcePref)
-        screen.addPreference(useTagGrouping)
         screen.addPreference(useExternalApiPref)
         screen.addPreference(externalApiUrlPref)
         screen.addPreference(useEmailPref)
@@ -427,9 +409,8 @@ class Anchira : HttpSource(), ConfigurableSource {
         val request = chain.request()
         val requestUrl = request.url.toString()
 
-        return if (requestUrl.contains("/api/v1")) {
+        return if (requestUrl.contains("/api/v3")) {
             val newRequestBuilder = request.newBuilder()
-            newRequestBuilder.header("ngrok-skip-browser-warning", "546")
 
             if (preferences.useExternalAPI) {
                 preferences.externalAPI.toHttpUrlOrNull()
