@@ -2,7 +2,6 @@ package eu.kanade.tachiyomi.extension.en.anchira
 
 import android.app.Application
 import android.content.SharedPreferences
-import android.text.InputType
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
@@ -11,7 +10,6 @@ import eu.kanade.tachiyomi.extension.en.anchira.AnchiraHelper.decodeBytes
 import eu.kanade.tachiyomi.extension.en.anchira.AnchiraHelper.getPathFromUrl
 import eu.kanade.tachiyomi.extension.en.anchira.AnchiraHelper.prepareTags
 import eu.kanade.tachiyomi.network.GET
-import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.Filter
@@ -22,15 +20,12 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import eu.kanade.tachiyomi.source.online.HttpSource
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import okhttp3.Cookie
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -56,7 +51,6 @@ class Anchira : HttpSource(), ConfigurableSource {
         .newBuilder()
         .rateLimit(2, 1, TimeUnit.SECONDS)
         .addInterceptor { apiInterceptor(it) }
-        .addInterceptor { authInterceptor(it) }
         .build()
 
     private val preferences: SharedPreferences by lazy {
@@ -144,6 +138,10 @@ class Anchira : HttpSource(), ConfigurableSource {
 
                 is FavoritesFilter -> {
                     if (filter.state) {
+                        if (!isLoggedIn()) {
+                            throw IOException("No login cookie found")
+                        }
+
                         url = url.toString().replace("library", "user/favorites").toHttpUrl()
                             .newBuilder()
                     }
@@ -181,7 +179,11 @@ class Anchira : HttpSource(), ConfigurableSource {
         }
     }
 
-    override fun getMangaUrl(manga: SManga) = "$baseUrl${manga.url}"
+    override fun getMangaUrl(manga: SManga) = if (preferences.openSource) {
+        "https://www.fakku.net/search/${manga.artist} ${manga.title}"
+    } else {
+        "$baseUrl${manga.url}"
+    }
 
     // Chapter
 
@@ -235,6 +237,22 @@ class Anchira : HttpSource(), ConfigurableSource {
             setEnabled(false)
         }
 
+        val openSourcePref = SwitchPreferenceCompat(screen.context).apply {
+            key = OPEN_SOURCE_PREF
+            title = "Search on FAKKU in WebView"
+            summary =
+                "Enable to open the search the book on FAKKU when opening the manga or chapter on WebView."
+            setDefaultValue(false)
+        }
+
+        val useTagGrouping = SwitchPreferenceCompat(screen.context).apply {
+            key = USE_TAG_GROUPING
+            title = "Group tags"
+            summary =
+                "Enable to group tags togheter by artist, circle, parody, magazine and general tags"
+            setDefaultValue(false)
+        }
+
         val externalApiUrlPref = EditTextPreference(screen.context).apply {
             key = EXTERNAL_API_URL_PREF
             title = "External API URL"
@@ -261,72 +279,11 @@ class Anchira : HttpSource(), ConfigurableSource {
             }
         }
 
-        val usernamePref = EditTextPreference(screen.context).apply {
-            key = USERNAME_PREF
-            title = "Username"
-            summary =
-                preferences.username.ifBlank { "Enter your username" }
-
-            setOnPreferenceChangeListener { _, newValue ->
-                summary = (newValue as String).ifBlank { "Enter your username" }
-                clearCookies()
-
-                true
-            }
-        }
-
-        val useEmailPref = SwitchPreferenceCompat(screen.context).apply {
-            key = USE_EMAIL_PREF
-            title = "Login with email"
-            summary = "Enable to login with an email instead of a username."
-
-            setOnPreferenceChangeListener { _, newValue ->
-                usernamePref.apply {
-                    title = if (newValue as Boolean) {
-                        "Email"
-                    } else {
-                        "Username"
-                    }
-                }
-                clearCookies()
-
-                true
-            }
-        }
-
-        val passwordPref = EditTextPreference(screen.context).apply {
-            key = PASSWORD_PREF
-            title = "Password"
-            summary = if (preferences.password.isBlank()) {
-                "Enter your password"
-            } else {
-                "*".repeat(
-                    preferences.password.length,
-                )
-            }
-
-            setOnBindEditTextListener {
-                it.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            }
-
-            setOnPreferenceChangeListener { _, newValue ->
-                summary = if ((newValue as String).isNotBlank()) {
-                    "*".repeat(newValue.length)
-                } else {
-                    "Enter your password"
-                }
-                clearCookies()
-
-                true
-            }
-        }
-
         screen.addPreference(imageQualityPref)
+        screen.addPreference(openSourcePref)
+        screen.addPreference(useTagGrouping)
         screen.addPreference(useExternalApiPref)
         screen.addPreference(externalApiUrlPref)
-        screen.addPreference(useEmailPref)
-        screen.addPreference(usernamePref)
-        screen.addPreference(passwordPref)
     }
 
     override fun getFilterList() = FilterList(
@@ -355,6 +312,9 @@ class Anchira : HttpSource(), ConfigurableSource {
     private val SharedPreferences.imageQuality
         get() = getString(IMAGE_QUALITY_PREF, "b")!!
 
+    private val SharedPreferences.openSource
+        get() = getBoolean(OPEN_SOURCE_PREF, false)
+
     private val SharedPreferences.useTagGrouping
         get() = getBoolean(USE_TAG_GROUPING, false)
 
@@ -363,40 +323,6 @@ class Anchira : HttpSource(), ConfigurableSource {
 
     private val SharedPreferences.externalAPI
         get() = getString(EXTERNAL_API_URL_PREF, "")!!
-
-    private val SharedPreferences.useEmail
-        get() = getBoolean(USE_EMAIL_PREF, false)
-
-    private val SharedPreferences.username
-        get() = getString(USERNAME_PREF, "")!!
-
-    private val SharedPreferences.password
-        get() = getString(PASSWORD_PREF, "")!!
-
-    private fun login(chain: Interceptor.Chain) {
-        if (preferences.username.isBlank() || preferences.password.isBlank()) {
-            throw IOException("Credentials are empty")
-        }
-
-        val body = Json.encodeToString(
-            mapOf(
-                (if (preferences.useEmail) "email" else "uname") to preferences.username,
-                "passwd" to preferences.password,
-            ),
-        ).toRequestBody()
-        val request = chain.request()
-        val headers = request.headers.newBuilder().add("Content-Type", "application/json").build()
-        val loginRequest = POST("$apiUrl/auth/login", headers, body)
-        val response = chain.proceed(loginRequest)
-
-        if (response.code != 200 || response.header("Set-Cookie").isNullOrEmpty()) {
-            throw IOException("Login failed")
-        }
-
-        setAuthCookie()
-
-        response.close()
-    }
 
     private fun apiInterceptor(chain: Interceptor.Chain): Response {
         val request = chain.request()
@@ -408,6 +334,7 @@ class Anchira : HttpSource(), ConfigurableSource {
             if (preferences.useExternalAPI) {
                 preferences.externalAPI.toHttpUrlOrNull()
                     ?: throw IOException("Invalid external API URL")
+                setAuthCookie()
                 newRequestBuilder.url(requestUrl.replace(baseUrl, preferences.externalAPI))
             }
 
@@ -431,69 +358,24 @@ class Anchira : HttpSource(), ConfigurableSource {
         }
     }
 
-    private fun authInterceptor(chain: Interceptor.Chain): Response {
-        val request = chain.request()
-
-        if (!request.url.toString().contains("/user/")) {
-            return chain.proceed(request)
-        }
-
-        if (authCookie.isBlank()) {
-            login(chain)
-        }
-
-        val authRequest = request.newBuilder().addHeader("Cookie", authCookie).build()
-
-        return chain.proceed(authRequest)
-    }
-
     private fun setAuthCookie() {
         val cookies = client.cookieJar.loadForRequest(baseUrl.toHttpUrl())
-        cookies.find { it.name == "session" }?.let { authCookie = it.value }
-
-        if (authCookie.isBlank() || !preferences.useExternalAPI) {
-            return
-        }
-
-        val url = preferences.externalAPI.toHttpUrlOrNull() ?: return
-        val cookieExpire = AnchiraHelper.formattedTomorrowDate()
-        val cookie = Cookie.parse(
-            url,
-            "session=$authCookie; Path=/; Expires=$cookieExpire; HttpOnly; Secure; SameSite=Lax",
-        )!!
-        client.cookieJar.saveFromResponse(url, listOf(cookie))
-    }
-
-    private fun clearCookies() {
-        authCookie = ""
-
-        val url = baseUrl.toHttpUrl()
-        val cookies = client.cookieJar.loadForRequest(url)
-        val obsoletedCookies = cookies.map {
-            val cookie = Cookie.parse(url, "${it.name}=; Max-Age=-1")!!
+        val externalUrl = preferences.externalAPI.toHttpUrl()
+        val newCookies = cookies.map {
+            val cookie = Cookie.parse(
+                externalUrl,
+                "${it.name}=${it.value}; Path=/; Expires=${it.expiresAt}; HttpOnly; Secure; SameSite=Lax",
+            )!!
             cookie
         }
-        client.cookieJar.saveFromResponse(url, obsoletedCookies)
-
-        clearExternalCookies()
+        client.cookieJar.saveFromResponse(externalUrl, newCookies)
     }
 
-    private fun clearExternalCookies() {
-        val url = preferences.externalAPI.toHttpUrlOrNull() ?: return
-        val cookies = client.cookieJar.loadForRequest(url)
-        val obsoletedCookies = cookies.map {
-            val cookie = Cookie.parse(url, "${it.name}=; Max-Age=-1")!!
-            cookie
+    private fun isLoggedIn() =
+        client.cookieJar.loadForRequest(baseUrl.toHttpUrl()).any {
+            println("Cookie: $it")
+            it.name == "session"
         }
-        client.cookieJar.saveFromResponse(url, obsoletedCookies)
-    }
-
-    private fun getSource(manga: SManga) =
-        preferences.getString(manga.url, null) ?: "$baseUrl${manga.url}"
-
-    init {
-        setAuthCookie()
-    }
 
     companion object {
         private const val IMAGE_QUALITY_PREF = "image_quality"
@@ -501,8 +383,5 @@ class Anchira : HttpSource(), ConfigurableSource {
         private const val USE_TAG_GROUPING = "use_tag_grouping"
         private const val USE_EXTERNAL_API_PREF = "use_external_api"
         private const val EXTERNAL_API_URL_PREF = "external_api_url"
-        private const val USE_EMAIL_PREF = "use_email"
-        private const val USERNAME_PREF = "username"
-        private const val PASSWORD_PREF = "password"
     }
 }
