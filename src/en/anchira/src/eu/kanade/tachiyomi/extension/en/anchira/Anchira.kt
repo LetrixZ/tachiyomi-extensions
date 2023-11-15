@@ -37,7 +37,7 @@ class Anchira : HttpSource(), ConfigurableSource {
 
     override val baseUrl = "https://anchira.to"
 
-    private val apiUrl = "$baseUrl/api/v3"
+    private val apiUrl = "$baseUrl/api/v1"
 
     private val libraryUrl = "$apiUrl/library"
 
@@ -56,8 +56,6 @@ class Anchira : HttpSource(), ConfigurableSource {
     private val preferences: SharedPreferences by lazy {
         Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
     }
-
-    private var authCookie = ""
 
     override fun headersBuilder() = super.headersBuilder().add("X-Requested-With", "XMLHttpRequest")
 
@@ -180,7 +178,7 @@ class Anchira : HttpSource(), ConfigurableSource {
     }
 
     override fun getMangaUrl(manga: SManga) = if (preferences.openSource) {
-        "https://www.fakku.net/search/${manga.artist} ${manga.title}"
+        getSource(manga)
     } else {
         "$baseUrl${manga.url}"
     }
@@ -239,9 +237,9 @@ class Anchira : HttpSource(), ConfigurableSource {
 
         val openSourcePref = SwitchPreferenceCompat(screen.context).apply {
             key = OPEN_SOURCE_PREF
-            title = "Search on FAKKU in WebView"
+            title = "Open original source site in WebView"
             summary =
-                "Enable to open the search the book on FAKKU when opening the manga or chapter on WebView."
+                "Enable to open the original source (when available) of the book when opening manga or chapter on WebView."
             setDefaultValue(false)
         }
 
@@ -328,7 +326,7 @@ class Anchira : HttpSource(), ConfigurableSource {
         val request = chain.request()
         val requestUrl = request.url.toString()
 
-        return if (requestUrl.contains("/api/v3")) {
+        return if (requestUrl.contains("/api/v1")) {
             val newRequestBuilder = request.newBuilder()
 
             if (preferences.useExternalAPI) {
@@ -376,6 +374,9 @@ class Anchira : HttpSource(), ConfigurableSource {
             println("Cookie: $it")
             it.name == "session"
         }
+
+    private fun getSource(manga: SManga) =
+        preferences.getString(manga.url, null) ?: "$baseUrl${manga.url}"
 
     companion object {
         private const val IMAGE_QUALITY_PREF = "image_quality"
