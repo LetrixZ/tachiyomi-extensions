@@ -72,7 +72,7 @@ class Anchira : HttpSource(), ConfigurableSource {
                     SManga.create().apply {
                         url = "/g/${it.id}/${it.key}"
                         title = it.title
-                        thumbnail_url = "$cdnUrl/${it.id}/${it.key}/m/${it.cover.name}"
+                        thumbnail_url = "$cdnUrl/${it.id}/${it.dataKey}/m/${it.cover.name}"
                         artist = it.tags.filter { it.namespace == 1 }.joinToString(", ") { it.name }
                         author = it.tags.filter { it.namespace == 2 }.joinToString(", ") { it.name }
                         genre = prepareTags(it.tags, preferences.useTagGrouping)
@@ -166,7 +166,7 @@ class Anchira : HttpSource(), ConfigurableSource {
             url = "/g/${data.id}/${data.key}"
             title = data.title
             thumbnail_url =
-                "$cdnUrl/${data.id}/${data.key}/m/${data.data[data.thumbnailIndex].name}"
+                "$cdnUrl/${data.id}/${data.dataKey}/m/${data.data[data.thumbnailIndex].name}"
             artist = data.tags.filter { it.namespace == 1 }.joinToString(", ") { it.name }
             author = data.tags.filter { it.namespace == 2 }.joinToString(", ") { it.name }
             genre = prepareTags(data.tags, preferences.useTagGrouping)
@@ -212,7 +212,7 @@ class Anchira : HttpSource(), ConfigurableSource {
         val data = decodeBytes<Entry>(response.body.bytes(), preferences.useExternalAPI)
 
         return data.data.mapIndexed { i, img ->
-            Page(i, imageUrl = "$cdnUrl/${data.id}/${data.key}/${data.hash}/b/${img.name}")
+            Page(i, imageUrl = "$cdnUrl/${data.id}/${data.dataKey}/${data.hash}/b/${img.name}")
         }
     }
 
@@ -369,11 +369,9 @@ class Anchira : HttpSource(), ConfigurableSource {
         client.cookieJar.saveFromResponse(externalUrl, newCookies)
     }
 
-    private fun isLoggedIn() =
-        client.cookieJar.loadForRequest(baseUrl.toHttpUrl()).any {
-            println("Cookie: $it")
-            it.name == "session"
-        }
+    private fun isLoggedIn() = client.cookieJar.loadForRequest(baseUrl.toHttpUrl()).any {
+        it.name == "session"
+    }
 
     private fun getSource(manga: SManga) =
         preferences.getString(manga.url, null) ?: "$baseUrl${manga.url}"
